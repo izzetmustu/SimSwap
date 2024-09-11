@@ -142,3 +142,6 @@ checkpoints/
 wandb/
 temp_results/
 output/*.*
+
+database*.json
+*.mp3

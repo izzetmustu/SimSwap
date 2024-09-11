@@ -98,3 +98,24 @@ class Face_detect_crop:
         # align_img = cv2.warpAffine(img, M, (crop_size, crop_size), borderValue=0.0)
         
         return align_img_list, M_list
+
+    def get_custom(self, img, crop_size, max_num=0):
+        bboxes, kpss = self.det_model.detect(img,
+                                             threshold=self.det_thresh,
+                                             max_num=max_num,
+                                             metric='default')
+        if bboxes.shape[0] == 0:
+            return None
+
+        align_img_list = []
+        M_list = []
+        for i in range(bboxes.shape[0]):
+            kps = None
+            if kpss is not None:
+                kps = kpss[i]
+            M, _ = face_align.estimate_norm(kps, crop_size, mode = self.mode) 
+            align_img = cv2.warpAffine(img, M, (crop_size, crop_size), borderValue=0.0)
+            align_img_list.append(align_img)
+            M_list.append(M)
+                    
+        return align_img_list, M_list, bboxes
