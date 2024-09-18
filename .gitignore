@@ -145,3 +145,4 @@ output/*.*
 
 database*.json
 *.mp3
+*.log
