@@ -1,3 +1,4 @@
+
 import cv2
 import torch
 import numpy as np
@@ -9,9 +10,9 @@ from util.norm import SpecificNorm
 from parsing_model.model import BiSeNet
 import json
 from util import load_database, get_latent, find_closest, swap_faces, update_face_history
-  
+
 def main(db_not_replaced:dict, db_to_replace:dict):
-  opt = RecognizeOptionsDataset().parse()
+  opt = RecognizeOptions().parse()
   opt.no_simswaplogo = True
   
   if opt.use_mask:
@@ -31,47 +32,58 @@ def main(db_not_replaced:dict, db_to_replace:dict):
   model.eval()
   spNorm = SpecificNorm()
   app = Face_detect_crop(name='antelope', root='./insightface_func/models')
-  app.prepare(ctx_id= 0, det_thresh=0.5, det_size=(224,224),mode=mode)
+  app.prepare(ctx_id= 0, det_thresh=0.6, det_size=(224,224),mode=mode)
 
-  #################### UPDATE THRESHOLD ####################
-  threshold = 1.0
+  threshold = 0.3
   
-  videos = os.listdir(opt.video_path)
-  videos = sorted(videos)
-  
-  num_videos = len(videos)
-  for i, video in enumerate(videos):
-    print(f"Processing video {i+1}/{num_videos}, {video}")
-  
-    cap = cv2.VideoCapture(os.path.join(opt.video_path, video))
-    # Total frames in the video
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    counter = 1
+  # Create pipeline
+  pipeline = dai.Pipeline()
+
+  # Define source and outputs
+  camRgb = pipeline.create(dai.node.ColorCamera)
+  xoutVideo = pipeline.create(dai.node.XLinkOut)
+  xoutPreview = pipeline.create(dai.node.XLinkOut)
+
+  xoutVideo.setStreamName("video")
+  xoutPreview.setStreamName("preview")
+
+  # Properties
+  camRgb.setPreviewSize(300, 300)
+  camRgb.setBoardSocket(dai.CameraBoardSocket.CAM_A)
+  camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+  camRgb.setInterleaved(True)
+  camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+
+  # Linking
+  camRgb.video.link(xoutVideo.input)
+  camRgb.preview.link(xoutPreview.input)
+
+  # Connect to device and start pipeline
+  with dai.Device(pipeline) as device:
+
+    video = device.getOutputQueue('video')
+    preview = device.getOutputQueue('preview')  
+
+    videoFrame = video.get()
+    previewFrame = preview.get()
     
     # Get the frame width, height, and frames per second (fps)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(videoFrame.getCvFrame().shape[1])
+    height = int(videoFrame.getCvFrame().shape[0])
     # print video properties
-    print(f"Width: {width}, Height: {height}, FPS: {fps}")
-    print(f"Total frames: {total_frames}")
-    print(f"Total duration: {total_frames/fps} seconds")
     
     # VideoWriter to save processed video frames
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(os.path.join(opt.output_path, 'tmp.mp4'), fourcc, fps, (width, height))
+    fps = 25
+    out = cv2.VideoWriter(os.path.join(opt.output_path, 'luxonis.mp4'), fourcc, fps, (width, height))
     
     # Initialize a history dictionary to store the last used embedding for unknown faces
-    face_history = {}    
-    
-    while cap.isOpened():
-      ret, frame = cap.read()
-      if not ret:
-          break
-      
-      if counter % 100 == 0:
-        print(f"Processing frame {counter}/{total_frames}")
-      counter += 1
+    face_history = {}
+
+    while true:
+      videoFrame = video.get()
+      previewFrame = preview.get()
+      frame = videoFrame.getCvFrame()
 
       with torch.no_grad():
         results = app.get_custom(frame, opt.crop_size)
@@ -99,7 +111,7 @@ def main(db_not_replaced:dict, db_to_replace:dict):
               closest_unknown = torch.Tensor(closest_unknown).cuda()
               # TO DO
               # CHECK IF THE PERSON IS THE SAME AS THE ONE IN THE PREVIOUS FRAME          
-              consistent_latent = update_face_history(face_history, face_embedding, closest_unknown, bbox)
+              consistent_latent = update_face_history(face_history,face_embedding, closest_unknown, bbox)
       
               faces_to_replace.append(face)
               mats_to_replace.append(mat)
@@ -110,13 +122,16 @@ def main(db_not_replaced:dict, db_to_replace:dict):
 
       # Write the processed frame to the video writer
       out.write(frame)
-      
-    # Release video capture and writer objects
-    cap.release()
-    out.release()
+      # Display the resulting frame
+      cv2.imshow('Webcam Frame', frame)
+
+      # Press 'q' to exit the loop
+      if cv2.waitKey(1) & 0xFF == ord('q'):
+          break
     
-    # Combine audio and the processed video
-    add_audio_to_video(os.path.join(opt.video_path, video), os.path.join(opt.output_path, 'tmp.mp4'), os.path.join(opt.output_path, video))
+  # Release video capture and writer objects
+  cap.release()
+  out.release()
 
 if __name__ == "__main__":
   db_not_replaced = load_database('database_not_replaced.json')

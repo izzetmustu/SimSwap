@@ -1,3 +1,4 @@
+
 import cv2
 import torch
 import numpy as np
@@ -9,7 +10,7 @@ from util.norm import SpecificNorm
 from parsing_model.model import BiSeNet
 import json
 from util import load_database, get_latent, find_closest, swap_faces, update_face_history
-  
+
 def main(db_not_replaced:dict, db_to_replace:dict):
   opt = RecognizeOptions().parse()
   opt.no_simswaplogo = True
@@ -34,34 +35,25 @@ def main(db_not_replaced:dict, db_to_replace:dict):
   app.prepare(ctx_id= 0, det_thresh=0.6, det_size=(224,224),mode=mode)
 
   threshold = 0.3
-  cap = cv2.VideoCapture(opt.video_path)
-  # Total frames in the video
-  total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-  counter = 1
+  cap = cv2.VideoCapture(0)
   
   # Get the frame width, height, and frames per second (fps)
   width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
   height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-  fps = cap.get(cv2.CAP_PROP_FPS)
   # print video properties
-  print(f"Width: {width}, Height: {height}, FPS: {fps}")
-  print(f"Total frames: {total_frames}")
-  print(f"Total duration: {total_frames/fps} seconds")
   
   # VideoWriter to save processed video frames
   fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-  out = cv2.VideoWriter(os.path.join(opt.output_path, 'result_wo_audio.mp4'), fourcc, fps, (width, height))
-
+  fps = 25
+  out = cv2.VideoWriter(os.path.join(opt.output_path, 'webcam.mp4'), fourcc, fps, (width, height))
+  
   # Initialize a history dictionary to store the last used embedding for unknown faces
   face_history = {}
-  
+
   while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
-
-    print(f"Processing frame {counter}/{total_frames}")
-    counter += 1
 
     with torch.no_grad():
       results = app.get_custom(frame, opt.crop_size)
@@ -89,7 +81,7 @@ def main(db_not_replaced:dict, db_to_replace:dict):
             closest_unknown = torch.Tensor(closest_unknown).cuda()
             # TO DO
             # CHECK IF THE PERSON IS THE SAME AS THE ONE IN THE PREVIOUS FRAME          
-            consistent_latent = update_face_history(face_history, face_embedding, closest_unknown, bbox)
+            consistent_latent = update_face_history(face_history,face_embedding, closest_unknown, bbox)
     
             faces_to_replace.append(face)
             mats_to_replace.append(mat)
@@ -100,13 +92,16 @@ def main(db_not_replaced:dict, db_to_replace:dict):
 
     # Write the processed frame to the video writer
     out.write(frame)
+    # Display the resulting frame
+    cv2.imshow('Webcam Frame', frame)
+
+    # Press 'q' to exit the loop
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
     
   # Release video capture and writer objects
   cap.release()
   out.release()
-  
-  # Combine audio and the processed video
-  add_audio_to_video(opt.video_path, os.path.join(opt.output_path, 'result_wo_audio.mp4'), os.path.join(opt.output_path, 'result.mp4'))
 
 if __name__ == "__main__":
   db_not_replaced = load_database('database_not_replaced.json')
